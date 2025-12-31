@@ -193,4 +193,74 @@ RSpec.describe RubyLLM::SemanticRouter::Strategies::Semantic do
       expect(decision.confidence).to be_within(0.01).of(1.0)
     end
   end
+
+  describe "custom find_examples" do
+    it "uses custom search when find_examples is provided" do
+      custom_search = ->(embedding, limit:) {
+        [{ agent_name: :account, example_text: "Custom result", distance: 0.2 }]
+      }
+
+      decision = strategy.route(
+        "any message",
+        agents: agents,
+        examples: [],
+        current_agent: :product,
+        config: config,
+        find_examples: custom_search
+      )
+
+      expect(decision.agent).to eq(:account)
+      expect(decision.matched_example).to eq("Custom result")
+      expect(decision.confidence).to eq(0.8)
+    end
+
+    it "falls back when custom search returns nil" do
+      custom_search = ->(embedding, limit:) { nil }
+
+      decision = strategy.route(
+        "any message",
+        agents: agents,
+        examples: [],
+        current_agent: :product,
+        config: config,
+        find_examples: custom_search
+      )
+
+      expect(decision.fallback?).to be true
+    end
+
+    it "supports object results with methods" do
+      result_object = Struct.new(:agent_name, :example_text, :distance).new(:product, "Object result", 0.15)
+      custom_search = ->(embedding, limit:) { [result_object] }
+
+      decision = strategy.route(
+        "any message",
+        agents: agents,
+        examples: [],
+        current_agent: :account,
+        config: config,
+        find_examples: custom_search
+      )
+
+      expect(decision.agent).to eq(:product)
+      expect(decision.confidence).to eq(0.85)
+    end
+
+    it "converts score to distance" do
+      custom_search = ->(embedding, limit:) {
+        [{ agent_name: :product, score: 0.9 }]
+      }
+
+      decision = strategy.route(
+        "any message",
+        agents: agents,
+        examples: [],
+        current_agent: :account,
+        config: config,
+        find_examples: custom_search
+      )
+
+      expect(decision.confidence).to eq(0.9)
+    end
+  end
 end

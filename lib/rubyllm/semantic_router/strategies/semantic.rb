@@ -11,9 +11,13 @@ module RubyLLM
       # 3. Routes to the agent associated with the best match
       # 4. Falls back if confidence is below threshold
       class Semantic < Base
-        def route(message, agents:, examples:, current_agent:, config:)
-          # If no examples, use fallback
-          if examples.nil? || examples_empty?(examples)
+        def route(message, agents:, examples:, current_agent:, config:, find_examples: nil)
+          # If custom find_examples provided, use it
+          # Otherwise, check if we have examples to search
+          has_search = find_examples.respond_to?(:call) ||
+                       (examples && !examples_empty?(examples))
+
+          unless has_search
             return apply_fallback(
               config: config,
               current_agent: current_agent,
@@ -24,8 +28,12 @@ module RubyLLM
           # Generate embedding for the message
           embedding = generate_embedding(message, config.embedding_model)
 
-          # Find nearest neighbors
-          matches = find_nearest_neighbors(examples, embedding, config)
+          # Find nearest neighbors using custom search or built-in
+          matches = if find_examples.respond_to?(:call)
+            find_with_custom_search(find_examples, embedding, config.k_neighbors)
+          else
+            find_nearest_neighbors(examples, embedding, config)
+          end
 
           # No matches found
           if matches.empty?
@@ -89,6 +97,17 @@ module RubyLLM
           else
             # In-memory array - calculate distances manually
             find_nearest_in_memory(examples.to_a, embedding, config.k_neighbors)
+          end
+        end
+
+        def find_with_custom_search(find_examples, embedding, limit)
+          # Call the custom search function
+          results = find_examples.call(embedding, limit: limit)
+          return [] if results.nil? || results.empty?
+
+          # Normalize results to have a consistent interface
+          results.map do |result|
+            CustomSearchMatch.new(result)
           end
         end
 
@@ -174,6 +193,49 @@ module RubyLLM
 
           def neighbor_distance
             distance
+          end
+        end
+
+        # Wrapper for custom search results (from find_examples callable)
+        # Accepts hashes or objects with agent_name, example_text, distance/score
+        class CustomSearchMatch
+          attr_reader :result
+
+          def initialize(result)
+            @result = result
+          end
+
+          def agent_name
+            fetch(:agent_name) || fetch(:agent)
+          end
+
+          def example_text
+            fetch(:example_text) || fetch(:text)
+          end
+
+          def distance
+            # Support both distance (lower is better) and score (higher is better)
+            if (d = fetch(:distance))
+              d
+            elsif (s = fetch(:score))
+              1.0 - s  # Convert score to distance
+            else
+              0.0
+            end
+          end
+
+          def neighbor_distance
+            distance
+          end
+
+          private
+
+          def fetch(key)
+            if result.is_a?(Hash)
+              result[key] || result[key.to_s]
+            elsif result.respond_to?(key)
+              result.send(key)
+            end
           end
         end
       end

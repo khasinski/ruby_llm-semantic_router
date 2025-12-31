@@ -170,6 +170,39 @@ router.current_agent                 # => :support
 router.messages.size                 # => 4 (2 exchanges)
 ```
 
+### Custom Vector Search
+
+Bring your own vector database (Pinecone, Qdrant, OpenSearch, etc.):
+
+```ruby
+router = RubyLLM::SemanticRouter.new(
+  agents: { product: product_chat, support: support_chat },
+  default_agent: :product,
+  find_examples: ->(embedding, limit:) {
+    # Pinecone
+    Pinecone.index("examples").query(vector: embedding, top_k: limit).matches.map do |m|
+      { agent_name: m.metadata[:agent], text: m.metadata[:text], score: m.score }
+    end
+  }
+)
+
+# Or with OpenSearch/Searchkick
+router = RubyLLM::SemanticRouter.new(
+  agents: { ... },
+  default_agent: :product,
+  find_examples: ->(embedding, limit:) {
+    RoutingExample.search("*",
+      knn: { field: :embedding, vector: embedding, k: limit }
+    ).map { |r| { agent_name: r.agent_name, text: r.text, distance: r.distance } }
+  }
+)
+```
+
+Return an array of hashes/objects with:
+- `agent_name` (or `agent`) - which agent this example routes to
+- `text` or `example_text` - the example text (optional, for debugging)
+- `distance` (lower is better) or `score` (higher is better)
+
 ## How Agents Share Context
 
 When the router switches agents, the new agent sees the **full conversation history** but with its own system prompt. This means:

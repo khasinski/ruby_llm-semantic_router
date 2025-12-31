@@ -51,7 +51,8 @@ module RubyLLM
         k_neighbors: nil,
         scope: nil,
         strategy: nil,
-        examples: nil
+        examples: nil,
+        find_examples: nil
       )
         @agents = normalize_agents(agents)
         @default_agent = default_agent.to_sym
@@ -59,6 +60,7 @@ module RubyLLM
         @strategy = strategy || Strategies::Semantic.new
         @examples = examples || []
         @scope = scope
+        @find_examples = find_examples
 
         validate_default_agent!
 
@@ -243,7 +245,8 @@ module RubyLLM
           agents: @agents,
           examples: scoped_examples,
           current_agent: @current_agent,
-          config: @config
+          config: @config,
+          find_examples: @find_examples
         )
 
         emit(:on_route, decision)

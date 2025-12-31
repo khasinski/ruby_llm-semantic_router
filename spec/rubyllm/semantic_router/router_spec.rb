@@ -338,4 +338,72 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
       expect(scoped_router.examples.size).to eq(1)
     end
   end
+
+  describe "custom find_examples" do
+    it "uses custom search function when provided" do
+      custom_results = [
+        { agent_name: :product, example_text: "Show products", distance: 0.1 }
+      ]
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        find_examples: ->(embedding, limit:) { custom_results }
+      )
+
+      decision = router.match("anything")
+
+      expect(decision.agent).to eq(:product)
+      expect(decision.confidence).to be > 0.5
+    end
+
+    it "supports score instead of distance" do
+      custom_results = [
+        { agent_name: :account, text: "Change password", score: 0.95 }
+      ]
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        find_examples: ->(embedding, limit:) { custom_results }
+      )
+
+      decision = router.match("reset my password")
+
+      expect(decision.agent).to eq(:account)
+      expect(decision.confidence).to eq(0.95)
+    end
+
+    it "falls back when custom search returns empty" do
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        find_examples: ->(embedding, limit:) { [] }
+      )
+
+      decision = router.match("anything")
+
+      expect(decision.agent).to eq(:general)
+      expect(decision.fallback?).to be true
+    end
+
+    it "passes embedding and limit to custom search" do
+      received_args = nil
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        k_neighbors: 5,
+        find_examples: ->(embedding, limit:) {
+          received_args = { embedding: embedding, limit: limit }
+          []
+        }
+      )
+
+      router.match("test message")
+
+      expect(received_args[:embedding]).to be_an(Array)
+      expect(received_args[:limit]).to eq(5)
+    end
+  end
 end
