@@ -55,7 +55,8 @@ router = RubyLLM::SemanticRouter.new(
   default_agent: :product,
   similarity_threshold: 0.7,          # Route only if confidence > threshold
   fallback: :default_agent,           # :default_agent | :keep_current | :ask_clarification
-  embedding_model: "text-embedding-3-small"
+  embedding_model: "text-embedding-3-small",
+  max_words: 50                       # Truncate messages to first N words (default: unlimited)
 )
 ```
 

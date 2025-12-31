@@ -406,4 +406,107 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
       expect(received_args[:limit]).to eq(5)
     end
   end
+
+  describe "max_words" do
+    it "defaults to nil (unlimited)" do
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general
+      )
+
+      # Access the config through internal state
+      config = router.instance_variable_get(:@config)
+      expect(config.max_words).to be_nil
+    end
+
+    it "accepts max_words parameter" do
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        max_words: 10
+      )
+
+      config = router.instance_variable_get(:@config)
+      expect(config.max_words).to eq(10)
+    end
+
+    it "truncates long messages when adding examples" do
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        max_words: 3
+      )
+
+      long_text = "one two three four five six seven"
+      router.add_example(long_text, agent: :product)
+
+      # The example text is stored as-is, but embedding was generated from truncated version
+      expect(router.examples.first.example_text).to eq(long_text)
+    end
+
+    it "truncates messages during routing" do
+      embedded_text = nil
+
+      # Capture what gets embedded
+      allow(RubyLLM).to receive(:embed) do |text, **opts|
+        embedded_text = text
+        double(vectors: Array.new(1536) { 0.0 })
+      end
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        max_words: 5
+      )
+
+      router.add_example("test", agent: :product)
+
+      long_message = "one two three four five six seven eight nine ten"
+      router.match(long_message)
+
+      # The last embed call should have been truncated
+      expect(embedded_text).to eq("one two three four five")
+    end
+
+    it "does not truncate when max_words is nil" do
+      embedded_text = nil
+
+      allow(RubyLLM).to receive(:embed) do |text, **opts|
+        embedded_text = text
+        double(vectors: Array.new(1536) { 0.0 })
+      end
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general,
+        max_words: nil
+      )
+
+      router.add_example("test", agent: :product)
+
+      long_message = "one two three four five six seven eight nine ten"
+      router.match(long_message)
+
+      expect(embedded_text).to eq(long_message)
+    end
+
+    it "uses global default_max_words" do
+      RubyLLM::SemanticRouter.configure do |config|
+        config.default_max_words = 20
+      end
+
+      router = described_class.new(
+        agents: agents,
+        default_agent: :general
+      )
+
+      config = router.instance_variable_get(:@config)
+      expect(config.max_words).to eq(20)
+
+      # Reset global config
+      RubyLLM::SemanticRouter.configure do |config|
+        config.default_max_words = nil
+      end
+    end
+  end
 end

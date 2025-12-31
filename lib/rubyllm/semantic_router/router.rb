@@ -10,6 +10,7 @@ module RubyLLM
       :fallback,
       :default_agent,
       :scope,
+      :max_words,
       keyword_init: true
     )
 
@@ -52,7 +53,8 @@ module RubyLLM
         scope: nil,
         strategy: nil,
         examples: nil,
-        find_examples: nil
+        find_examples: nil,
+        max_words: nil
       )
         @agents = normalize_agents(agents)
         @default_agent = default_agent.to_sym
@@ -68,7 +70,8 @@ module RubyLLM
           embedding_model: embedding_model,
           similarity_threshold: similarity_threshold,
           k_neighbors: k_neighbors,
-          fallback: fallback
+          fallback: fallback,
+          max_words: max_words
         )
 
         @chat = nil
@@ -284,7 +287,8 @@ module RubyLLM
       end
 
       def generate_embedding(text)
-        response = RubyLLM.embed(text, model: @config.embedding_model)
+        truncated = truncate_to_max_words(text)
+        response = RubyLLM.embed(truncated, model: @config.embedding_model)
         vectors = response.vectors
         # RubyLLM returns the vector directly for single inputs,
         # or wrapped in an array for batch inputs
@@ -294,13 +298,23 @@ module RubyLLM
       end
 
       def generate_embeddings_batch(texts)
-        response = RubyLLM.embed(texts, model: @config.embedding_model)
+        truncated_texts = texts.map { |t| truncate_to_max_words(t) }
+        response = RubyLLM.embed(truncated_texts, model: @config.embedding_model)
         vectors = response.vectors
         # For batch, RubyLLM returns array of vectors
         # But if single text was passed, it returns vector directly
         vectors.first.is_a?(Array) ? vectors : [vectors]
       rescue StandardError => e
         raise EmbeddingError, e
+      end
+
+      def truncate_to_max_words(text)
+        return text unless @config.max_words
+
+        words = text.split
+        return text if words.size <= @config.max_words
+
+        words.first(@config.max_words).join(" ")
       end
 
       def find_nearest_in_memory(examples, query_embedding, k)
@@ -440,7 +454,7 @@ module RubyLLM
         raise AgentNotFoundError.new(agent_name, @agents.keys)
       end
 
-      def build_config(embedding_model:, similarity_threshold:, k_neighbors:, fallback:)
+      def build_config(embedding_model:, similarity_threshold:, k_neighbors:, fallback:, max_words:)
         global_config = SemanticRouter.configuration || Configuration.new
 
         RouterConfig.new(
@@ -449,7 +463,8 @@ module RubyLLM
           k_neighbors: k_neighbors || global_config.default_k_neighbors,
           fallback: fallback || global_config.default_fallback,
           default_agent: @default_agent,
-          scope: @scope
+          scope: @scope,
+          max_words: max_words || global_config.default_max_words
         )
       end
 

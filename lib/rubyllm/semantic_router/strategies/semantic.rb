@@ -26,7 +26,7 @@ module RubyLLM
           end
 
           # Generate embedding for the message
-          embedding = generate_embedding(message, config.embedding_model)
+          embedding = generate_embedding(message, config.embedding_model, max_words: config.max_words)
 
           # Find nearest neighbors using custom search or built-in
           matches = if find_examples.respond_to?(:call)
@@ -78,13 +78,23 @@ module RubyLLM
           end
         end
 
-        def generate_embedding(message, model)
-          response = RubyLLM.embed(message, model: model)
+        def generate_embedding(message, model, max_words: nil)
+          truncated = truncate_to_max_words(message, max_words)
+          response = RubyLLM.embed(truncated, model: model)
           vectors = response.vectors
           # RubyLLM returns vector directly for single input, array of vectors for batch
           vectors.first.is_a?(Array) ? vectors.first : vectors
         rescue StandardError => e
           raise EmbeddingError, e
+        end
+
+        def truncate_to_max_words(text, max_words)
+          return text unless max_words
+
+          words = text.split
+          return text if words.size <= max_words
+
+          words.first(max_words).join(" ")
         end
 
         def find_nearest_neighbors(examples, embedding, config)

@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rubyllm-semantic_router (0.1.0)
+    rubyllm-semantic_router (0.2.0)
       ruby_llm (~> 1.0)
 
 GEM

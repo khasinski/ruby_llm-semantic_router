@@ -16,11 +16,15 @@ module RubyLLM
       # Default fallback behavior (:default_agent, :keep_current, :ask_clarification)
       attr_accessor :default_fallback
 
+      # Default max words to use for embedding (nil = unlimited)
+      attr_accessor :default_max_words
+
       def initialize
         @default_embedding_model = "text-embedding-3-small"
         @default_similarity_threshold = 0.7
         @default_k_neighbors = 3
         @default_fallback = :default_agent
+        @default_max_words = nil
       end
     end
   end
