@@ -72,7 +72,9 @@ module RubyLLM
 
         def generate_embedding(message, model)
           response = RubyLLM.embed(message, model: model)
-          response.vectors.first
+          vectors = response.vectors
+          # RubyLLM returns vector directly for single input, array of vectors for batch
+          vectors.first.is_a?(Array) ? vectors.first : vectors
         rescue StandardError => e
           raise EmbeddingError, e
         end

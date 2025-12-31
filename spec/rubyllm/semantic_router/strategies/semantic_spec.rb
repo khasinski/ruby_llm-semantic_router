@@ -3,22 +3,17 @@
 RSpec.describe RubyLLM::SemanticRouter::Strategies::Semantic do
   let(:strategy) { described_class.new }
 
-  let(:product_agent) do
-    RubyLLM::SemanticRouter::Agent.new(
-      name: :product,
-      instructions: "Product specialist"
-    )
-  end
-
-  let(:account_agent) do
-    RubyLLM::SemanticRouter::Agent.new(
-      name: :account,
-      instructions: "Account manager"
-    )
-  end
-
   let(:agents) do
-    { product: product_agent, account: account_agent }
+    {
+      product: RubyLLM::SemanticRouter::AgentConfig.new(
+        name: :product,
+        instructions: "Product specialist"
+      ),
+      account: RubyLLM::SemanticRouter::AgentConfig.new(
+        name: :account,
+        instructions: "Account manager"
+      )
+    }
   end
 
   let(:config) do
@@ -33,7 +28,9 @@ RSpec.describe RubyLLM::SemanticRouter::Strategies::Semantic do
   end
 
   def create_example(text, agent_name)
-    embedding = RubyLLM.embed(text, model: "test").vectors.first
+    vectors = RubyLLM.embed(text, model: "test").vectors
+    # Handle both single (returns vector directly) and batch (returns array of vectors)
+    embedding = vectors.first.is_a?(Array) ? vectors.first : vectors
     RubyLLM::SemanticRouter::Router::InMemoryExample.new(
       agent_name: agent_name,
       example_text: text,

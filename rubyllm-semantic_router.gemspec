@@ -15,9 +15,7 @@ Gem::Specification.new do |spec|
   spec.homepage      = "https://github.com/khasinski/ruby_llm-semantic_router"
   spec.license       = "MIT"
 
-  # Note: In production, ruby_llm requires Ruby >= 3.1.0
-  # For development/testing, we can use older Ruby with mocks
-  spec.required_ruby_version = ">= 2.6.0"
+  spec.required_ruby_version = ">= 3.1.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
@@ -31,8 +29,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Runtime dependencies
-  # Note: ruby_llm requires Ruby >= 3.1.0
-  # spec.add_dependency "ruby_llm", ">= 1.0"
+  spec.add_dependency "ruby_llm", ">= 1.0"
 
   # Development dependencies
   spec.add_development_dependency "bundler", ">= 1.17"

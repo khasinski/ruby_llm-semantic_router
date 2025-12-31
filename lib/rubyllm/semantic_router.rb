@@ -16,7 +16,6 @@ require_relative "semantic_router/version"
 require_relative "semantic_router/errors"
 require_relative "semantic_router/configuration"
 require_relative "semantic_router/routing_decision"
-require_relative "semantic_router/agent"
 require_relative "semantic_router/strategies/base"
 require_relative "semantic_router/strategies/semantic"
 require_relative "semantic_router/router"
@@ -25,6 +24,10 @@ module RubyLLM
   module SemanticRouter
     class << self
       attr_accessor :configuration
+
+      def new(**options)
+        Router.new(**options)
+      end
 
       def configure
         self.configuration ||= Configuration.new

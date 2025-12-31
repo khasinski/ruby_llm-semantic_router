@@ -25,12 +25,14 @@ module RubyLLM
     end
 
     # Generate deterministic embeddings based on text content
-    # Supports both single text and array of texts
+    # Matches real RubyLLM behavior:
+    # - Single text: returns vector directly
+    # - Array of texts: returns array of vectors
     def vectors
       if @input.is_a?(Array)
         @input.map { |text| generate_mock_embedding(text) }
       else
-        [generate_mock_embedding(@input)]
+        generate_mock_embedding(@input)
       end
     end
 

@@ -43,20 +43,14 @@ RSpec.describe RubyLLM::SemanticRouter do
 
   describe "integration" do
     it "works end-to-end" do
-      # Define agents
-      product_agent = RubyLLM::SemanticRouter::Agent.define do
-        name :product
-        instructions "You help with products"
-      end
+      # Define agents as RubyLLM.chat objects
+      agents = {
+        product: RubyLLM.chat.with_instructions("You help with products"),
+        account: RubyLLM.chat.with_instructions("You help with accounts")
+      }
 
-      account_agent = RubyLLM::SemanticRouter::Agent.define do
-        name :account
-        instructions "You help with accounts"
-      end
-
-      # Create router
-      router = RubyLLM::SemanticRouter::Router.new(
-        agents: [product_agent, account_agent],
+      router = RubyLLM::SemanticRouter.new(
+        agents: agents,
         default_agent: :product,
         similarity_threshold: 0.5
       )

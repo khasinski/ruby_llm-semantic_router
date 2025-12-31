@@ -13,15 +13,28 @@ module RubyLLM
       keyword_init: true
     )
 
+    # Internal representation of agent config (extracted from chat objects)
+    AgentConfig = Struct.new(:name, :instructions, :tools, :model, :temperature, keyword_init: true) do
+      def tools
+        self[:tools] || []
+      end
+    end
+
     # Main router class that routes messages to specialized agents
     #
     # @example
-    #   router = RubyLLM::SemanticRouter::Router.new(
-    #     agents: [ProductAgent, AccountAgent],
+    #   router = RubyLLM::SemanticRouter.new(
+    #     agents: {
+    #       product: RubyLLM.chat(model: "gpt-4o-mini")
+    #                       .with_instructions("You're a product expert..."),
+    #       support: RubyLLM.chat(model: "gpt-4o")
+    #                       .with_instructions("You help with issues...")
+    #                       .with_tools(DiagnosticTool)
+    #     },
     #     default_agent: :product
     #   )
     #   router.add_example("Show me products", agent: :product)
-    #   router.ask("What laptops do you have?") # Routes to product agent
+    #   router.ask("What laptops do you have?")
     #
     class Router
       attr_reader :agents, :current_agent, :last_routing_decision
@@ -62,29 +75,19 @@ module RubyLLM
 
       # Send a message to the router and get a response
       #
-      # The router will:
-      # 1. Determine which agent should handle the message
-      # 2. Switch to that agent if needed
-      # 3. Forward the message to the agent's chat
-      # 4. Return the response
-      #
       # @param message [String] The user's message
       # @yield [chunk] Optional block for streaming responses
       # @return [RubyLLM::Message] The response from the selected agent
       def ask(message, &block)
-        # Route the message to determine target agent
         @last_routing_decision = route(message)
 
-        # Switch agent if needed
         target_agent = @last_routing_decision.agent
         switch_to(target_agent) if target_agent != @current_agent
 
-        # Handle clarification injection if needed
         if @last_routing_decision.needs_clarification?
           inject_clarification_prompt
         end
 
-        # Forward to the agent's chat
         current_chat.ask(message, &block)
       end
 
@@ -99,34 +102,26 @@ module RubyLLM
 
         embedding = generate_embedding(text)
 
-        example = InMemoryExample.new(
+        @examples << InMemoryExample.new(
           agent_name: agent_name,
           example_text: text,
           embedding: embedding
         )
-
-        @examples << example
         self
       end
 
-      # Import multiple routing examples at once
-      # Uses batch embedding for efficiency
+      # Import multiple routing examples at once (batch embedding)
       #
       # @param examples [Array<Hash>] Array of {text:, agent:} hashes
       # @return [self]
       def import_examples(examples)
         return self if examples.empty?
 
-        # Validate all agents exist first
-        examples.each do |example|
-          validate_agent_exists!(example[:agent].to_sym)
-        end
+        examples.each { |e| validate_agent_exists!(e[:agent].to_sym) }
 
-        # Batch embed all texts at once
         texts = examples.map { |e| e[:text] }
         embeddings = generate_embeddings_batch(texts)
 
-        # Create examples with pre-computed embeddings
         examples.each_with_index do |example, i|
           @examples << InMemoryExample.new(
             agent_name: example[:agent].to_sym,
@@ -139,10 +134,9 @@ module RubyLLM
       end
 
       # Preview routing without sending the message
-      # Useful for debugging and testing routing decisions
       #
       # @param message [String] The message to test
-      # @return [RoutingDecision] What would happen if this message was sent
+      # @return [RoutingDecision]
       def match(message)
         route(message)
       end
@@ -150,16 +144,16 @@ module RubyLLM
       # Get detailed routing info for debugging
       #
       # @param message [String] The message to analyze
-      # @return [Hash] Detailed routing information including top matches
+      # @return [Hash]
       def debug_routing(message)
         embedding = generate_embedding(message)
 
         matches = if @examples.respond_to?(:nearest_neighbors)
           @examples.nearest_neighbors(:embedding, embedding, distance: :cosine)
-                   .limit(@config.k_neighbors * 2) # Get more for debugging
+                   .limit(@config.k_neighbors * 2)
                    .to_a
         else
-          find_nearest_in_memory_debug(@examples.to_a, embedding, @config.k_neighbors * 2)
+          find_nearest_in_memory(@examples.to_a, embedding, @config.k_neighbors * 2)
         end
 
         {
@@ -169,71 +163,52 @@ module RubyLLM
           would_route_to: match(message).agent,
           top_matches: matches.map do |m|
             {
-              agent: extract_agent_name_safe(m),
-              example: extract_example_text_safe(m),
-              confidence: calculate_confidence_safe(m)
+              agent: extract_agent_name(m),
+              example: extract_example_text(m),
+              confidence: calculate_confidence(m)
             }
           end
         }
       end
 
       # Get the current chat object
-      #
-      # @return [RubyLLM::Chat]
       def current_chat
         @chat ||= build_chat_for_agent(@current_agent)
       end
 
       # Get all messages in the conversation
-      #
-      # @return [Array<RubyLLM::Message>]
       def messages
         current_chat.messages
       end
 
       # Get the names of all registered agents
-      #
-      # @return [Array<Symbol>]
       def agent_names
         @agents.keys
       end
 
-      # Get an agent by name
-      #
-      # @param name [Symbol, String] Agent name
-      # @return [Agent]
+      # Get an agent config by name
       def agent(name)
         @agents[name.to_sym]
       end
 
       # Get all routing examples
-      #
-      # @return [Array]
       def examples
         @examples
       end
 
       # Clear all routing examples
-      #
-      # @return [self]
       def clear_examples!
         @examples = []
         self
       end
 
       # Use an external examples source (e.g., ActiveRecord model)
-      #
-      # @param source [#nearest_neighbors] An object that responds to nearest_neighbors
-      # @return [self]
       def with_examples(source)
         @examples = source
         self
       end
 
       # Manually switch to a specific agent
-      #
-      # @param agent_name [Symbol, String] Name of the agent to switch to
-      # @return [self]
       def switch_to(agent_name)
         agent_name = agent_name.to_sym
         validate_agent_exists!(agent_name)
@@ -242,7 +217,6 @@ module RubyLLM
 
         agent = @agents[agent_name]
 
-        # Reconfigure the existing chat (preserving history)
         if @chat
           @chat.with_instructions(agent.instructions, replace: true)
           @chat.with_tools(*agent.tools, replace: true) if agent.tools.any?
@@ -255,10 +229,6 @@ module RubyLLM
       end
 
       # Register event callbacks
-      #
-      # @param event [Symbol] Event name (:on_route, :on_switch)
-      # @yield Block to call when event occurs
-      # @return [self]
       def on(event, &block)
         @callbacks ||= {}
         @callbacks[event] = block
@@ -303,7 +273,6 @@ module RubyLLM
       end
 
       def inject_clarification_prompt
-        # Temporarily append clarification instruction
         instruction = @last_routing_decision.inject_instruction
         return unless instruction
 
@@ -313,20 +282,25 @@ module RubyLLM
 
       def generate_embedding(text)
         response = RubyLLM.embed(text, model: @config.embedding_model)
-        response.vectors.first
+        vectors = response.vectors
+        # RubyLLM returns the vector directly for single inputs,
+        # or wrapped in an array for batch inputs
+        vectors.first.is_a?(Array) ? vectors.first : vectors
       rescue StandardError => e
         raise EmbeddingError, e
       end
 
       def generate_embeddings_batch(texts)
-        # RubyLLM.embed supports batch embedding
         response = RubyLLM.embed(texts, model: @config.embedding_model)
-        response.vectors
+        vectors = response.vectors
+        # For batch, RubyLLM returns array of vectors
+        # But if single text was passed, it returns vector directly
+        vectors.first.is_a?(Array) ? vectors : [vectors]
       rescue StandardError => e
         raise EmbeddingError, e
       end
 
-      def find_nearest_in_memory_debug(examples, query_embedding, k)
+      def find_nearest_in_memory(examples, query_embedding, k)
         examples.map do |example|
           distance = cosine_distance(query_embedding, example.embedding)
           Strategies::Semantic::InMemoryMatch.new(example, distance)
@@ -341,15 +315,15 @@ module RubyLLM
         1.0 - (dot_product / (magnitude_a * magnitude_b))
       end
 
-      def extract_agent_name_safe(match)
+      def extract_agent_name(match)
         match.respond_to?(:agent_name) ? match.agent_name : match.example&.agent_name
       end
 
-      def extract_example_text_safe(match)
+      def extract_example_text(match)
         match.respond_to?(:example_text) ? match.example_text : match.example&.example_text
       end
 
-      def calculate_confidence_safe(match)
+      def calculate_confidence(match)
         distance = match.respond_to?(:neighbor_distance) ? match.neighbor_distance : match.distance
         [1.0 - (distance || 1.0), 0.0].max.round(3)
       end
@@ -357,23 +331,109 @@ module RubyLLM
       def normalize_agents(agents)
         raise NoAgentsError if agents.nil? || agents.empty?
 
-        agents.each_with_object({}) do |agent, hash|
-          unless agent.is_a?(Agent)
-            raise InvalidAgentError, "Expected Agent, got #{agent.class}"
+        unless agents.is_a?(Hash)
+          raise InvalidAgentError, "agents must be a Hash of { name: chat_object }"
+        end
+
+        agents.each_with_object({}) do |(name, chat_or_config), hash|
+          name = name.to_sym
+
+          # Check if it's a RubyLLM chat object (has with_instructions method)
+          if chat_or_config.respond_to?(:with_instructions)
+            hash[name] = extract_config_from_chat(name, chat_or_config)
+          elsif chat_or_config.is_a?(Hash)
+            # Legacy hash format for backwards compatibility
+            raise InvalidAgentError, "instructions required for agent :#{name}" unless chat_or_config[:instructions]
+
+            hash[name] = AgentConfig.new(
+              name: name,
+              instructions: chat_or_config[:instructions],
+              tools: Array(chat_or_config[:tools]),
+              model: chat_or_config[:model],
+              temperature: chat_or_config[:temperature]
+            )
+          elsif chat_or_config.respond_to?(:instructions)
+            # Already an AgentConfig-like object
+            hash[name] = chat_or_config
+          else
+            raise InvalidAgentError, "agent :#{name} must be a RubyLLM.chat object or a config hash"
           end
-          hash[agent.name] = agent
+        end
+      end
+
+      def extract_config_from_chat(name, chat)
+        # Extract configuration from a RubyLLM chat object
+        instructions = extract_instructions(chat)
+        raise InvalidAgentError, "agent :#{name} must have instructions (use .with_instructions)" unless instructions
+
+        tools = extract_tools(chat)
+        model = extract_model(chat)
+        temperature = extract_temperature(chat)
+
+        AgentConfig.new(
+          name: name,
+          instructions: instructions,
+          tools: tools,
+          model: model,
+          temperature: temperature
+        )
+      end
+
+      def extract_instructions(chat)
+        # Try direct accessor first (for mocks/simple objects)
+        return chat.instructions if chat.respond_to?(:instructions) && chat.instructions
+
+        # RubyLLM stores instructions as a system message
+        if chat.respond_to?(:messages)
+          system_msg = chat.messages.find { |m| m.role == :system }
+          if system_msg&.content
+            return system_msg.content.respond_to?(:text) ? system_msg.content.text : system_msg.content.to_s
+          end
+        end
+
+        nil
+      end
+
+      def extract_tools(chat)
+        return [] unless chat.respond_to?(:tools)
+
+        tools = chat.tools
+        case tools
+        when Hash then tools.values
+        when Array then tools
+        else []
+        end
+      end
+
+      def extract_model(chat)
+        return chat.model_id if chat.respond_to?(:model_id) && chat.model_id
+
+        if chat.respond_to?(:model) && chat.model
+          model = chat.model
+          # RubyLLM returns a Model::Info object, extract the id
+          return model.respond_to?(:id) ? model.id : model.to_s
+        end
+
+        nil
+      end
+
+      def extract_temperature(chat)
+        if chat.respond_to?(:temperature_value)
+          chat.temperature_value
+        elsif chat.respond_to?(:temperature)
+          chat.temperature
+        else
+          chat.instance_variable_get(:@temperature)
         end
       end
 
       def validate_default_agent!
         return if @agents.key?(@default_agent)
-
         raise AgentNotFoundError.new(@default_agent, @agents.keys)
       end
 
       def validate_agent_exists!(agent_name)
         return if @agents.key?(agent_name)
-
         raise AgentNotFoundError.new(agent_name, @agents.keys)
       end
 

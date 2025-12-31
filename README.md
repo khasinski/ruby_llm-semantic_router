@@ -45,23 +45,20 @@ User: "What's your cheapest laptop?"
 ```ruby
 require 'rubyllm/semantic_router'
 
-# 1. Define your specialized agents
-ProductAgent = RubyLLM::SemanticRouter::Agent.define do
-  name :product
-  instructions "You're a product expert. Help users find and compare products."
-  model "gpt-4o-mini"  # Cheap model for simple queries
-end
+# 1. Define your agents as regular RubyLLM chat objects
+product_chat = RubyLLM.chat(model: "gpt-4o-mini")
+                      .with_instructions("You're a product expert. Help users find products.")
 
-SupportAgent = RubyLLM::SemanticRouter::Agent.define do
-  name :support
-  instructions "You're a technical support specialist. Troubleshoot issues."
-  model "gpt-4o"  # Smarter model for complex problems
-  tools DiagnosticTool, TicketCreator
-end
+support_chat = RubyLLM.chat(model: "gpt-4o")
+                      .with_instructions("You're technical support. Troubleshoot issues.")
+                      .with_tools(DiagnosticTool, TicketCreator)
 
 # 2. Create router with your agents
-router = RubyLLM::SemanticRouter::Router.new(
-  agents: [ProductAgent, SupportAgent],
+router = RubyLLM::SemanticRouter.new(
+  agents: {
+    product: product_chat,
+    support: support_chat
+  },
   default_agent: :product  # Fallback when uncertain
 )
 
@@ -76,8 +73,8 @@ router.import_examples([
 ])
 
 # 4. Chat! Routing happens automatically.
-router.ask("What gaming laptops do you have?")  # → ProductAgent
-router.ask("My order is stuck")                  # → SupportAgent
+router.ask("What gaming laptops do you have?")  # → product agent
+router.ask("My order is stuck")                  # → support agent
 ```
 
 ## When To Use This
@@ -93,28 +90,28 @@ router.ask("My order is stuck")                  # → SupportAgent
 - Overlapping domains where context matters more than classification
 - No training examples available
 
-**The honest truth**: A well-prompted single agent with good tools often works fine. This gem shines when you have clear domain separation and enough examples to train the router.
-
 ## API
 
 ### Defining Agents
 
+Agents are just RubyLLM chat objects - use the same API you already know:
+
 ```ruby
-MyAgent = RubyLLM::SemanticRouter::Agent.define do
-  name :my_agent                    # Required: unique identifier
-  instructions "System prompt..."   # Required: agent's personality
-  model "claude-sonnet-4"           # Optional: override default model
-  temperature 0.7                    # Optional: creativity level
-  tools Tool1, Tool2                 # Optional: agent-specific tools
-end
+my_agent = RubyLLM.chat(model: "claude-sonnet-4")
+                  .with_instructions("You're a specialist...")
+                  .with_tools(Tool1, Tool2)
+                  .with_temperature(0.7)
 ```
 
 ### Router Options
 
 ```ruby
-router = RubyLLM::SemanticRouter::Router.new(
-  agents: [Agent1, Agent2],
-  default_agent: :agent1,
+router = RubyLLM::SemanticRouter.new(
+  agents: {
+    product: product_chat,
+    support: support_chat
+  },
+  default_agent: :product,
 
   # When confidence is below threshold, what to do?
   fallback: :default_agent,      # Use default (default)
@@ -198,7 +195,7 @@ The conversation flows naturally. Users don't notice the switch.
 
 ```bash
 bundle install
-bundle exec rspec  # 66 tests
+bundle exec rspec
 ```
 
 ## License

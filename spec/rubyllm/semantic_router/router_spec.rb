@@ -1,30 +1,16 @@
 # frozen_string_literal: true
 
 RSpec.describe RubyLLM::SemanticRouter::Router do
-  let(:product_agent) do
-    RubyLLM::SemanticRouter::Agent.new(
-      name: :product,
-      instructions: "You are a product specialist. Help users find products.",
-      model: "claude-sonnet-4"
-    )
+  let(:agents) do
+    {
+      product: RubyLLM.chat(model: "claude-sonnet-4")
+                      .with_instructions("You are a product specialist. Help users find products."),
+      account: RubyLLM.chat
+                      .with_instructions("You help users manage their accounts."),
+      general: RubyLLM.chat
+                      .with_instructions("You are a helpful general assistant.")
+    }
   end
-
-  let(:account_agent) do
-    RubyLLM::SemanticRouter::Agent.new(
-      name: :account,
-      instructions: "You help users manage their accounts.",
-      tools: []
-    )
-  end
-
-  let(:general_agent) do
-    RubyLLM::SemanticRouter::Agent.new(
-      name: :general,
-      instructions: "You are a helpful general assistant."
-    )
-  end
-
-  let(:agents) { [product_agent, account_agent, general_agent] }
 
   describe ".new" do
     it "creates a router with agents and default agent" do
@@ -46,6 +32,15 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
       }.to raise_error(RubyLLM::SemanticRouter::AgentNotFoundError, /unknown/)
     end
 
+    it "raises error when instructions missing" do
+      expect {
+        described_class.new(
+          agents: { broken: RubyLLM.chat(model: "gpt-4") },
+          default_agent: :broken
+        )
+      }.to raise_error(RubyLLM::SemanticRouter::InvalidAgentError, /instructions/)
+    end
+
     it "uses global configuration defaults" do
       RubyLLM::SemanticRouter.configure do |config|
         config.default_similarity_threshold = 0.8
@@ -57,7 +52,6 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
         default_agent: :general
       )
 
-      # Configuration is applied internally
       expect(router).to be_a(described_class)
     end
 
@@ -143,7 +137,7 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
 
       expect(decision).to be_a(RubyLLM::SemanticRouter::RoutingDecision)
       expect(decision.agent).to eq(:product)
-      expect(router.messages).to be_empty # No message sent
+      expect(router.messages).to be_empty
     end
   end
 
@@ -212,9 +206,9 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
 
     it "preserves message history across agent switches" do
       router.ask("Show me products")
-      router.ask("Change my password")  # Use exact match for mock embedding
+      router.ask("Change my password")
 
-      expect(router.messages.size).to eq(4) # 2 exchanges
+      expect(router.messages.size).to eq(4)
       expect(router.current_agent).to eq(:account)
     end
 
@@ -273,16 +267,18 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
       described_class.new(agents: agents, default_agent: :general)
     end
 
-    it "returns agent by name" do
+    it "returns agent config by name" do
       agent = router.agent(:product)
 
-      expect(agent).to eq(product_agent)
+      expect(agent.name).to eq(:product)
+      expect(agent.instructions).to eq("You are a product specialist. Help users find products.")
+      expect(agent.model).to eq("claude-sonnet-4")
     end
 
     it "accepts string names" do
       agent = router.agent("product")
 
-      expect(agent).to eq(product_agent)
+      expect(agent.name).to eq(:product)
     end
   end
 
@@ -337,7 +333,6 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
         scope: "tenant_1"
       )
 
-      # Add example (scope is handled internally for in-memory)
       scoped_router.add_example("Products", agent: :product)
 
       expect(scoped_router.examples.size).to eq(1)
