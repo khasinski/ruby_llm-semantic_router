@@ -11,9 +11,7 @@ You have multiple specialized chat agents:
 
 How do you decide which one handles "I can't log in" vs "What's your return policy" vs "Show me laptops under $1000"?
 
-**Option A**: One mega-agent with all tools and a complex system prompt. Works, but gets confused with 20+ tools.
-
-**Option B**: Route first, then chat. This gem.
+This gem provides fast, embedding-based routing - no LLM call needed for the routing decision itself.
 
 ## How It Works
 
