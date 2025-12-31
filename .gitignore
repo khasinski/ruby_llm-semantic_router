@@ -20,3 +20,6 @@ vendor/
 # RSpec
 .rspec_status
 *.gem
+
+# Test Rails app
+/test_app/

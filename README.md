@@ -80,11 +80,13 @@ router.add_example("Show products", agent: :product)
 router.import_examples([...])
 ```
 
-### ActiveRecord + pgvector
+### ActiveRecord + neighbor gem
+
+Works with PostgreSQL (pgvector), SQLite (sqlite-vec), MySQL (vector), and [more](https://github.com/ankane/neighbor):
 
 ```ruby
 class RoutingExample < ApplicationRecord
-  has_neighbors :embedding  # Uses neighbor gem
+  has_neighbors :embedding
 end
 
 router.with_examples(RoutingExample.all)
