@@ -1,0 +1,180 @@
+# frozen_string_literal: true
+
+module RubyLLM
+  module SemanticRouter
+    module Strategies
+      # Semantic routing strategy using embeddings and kNN search
+      #
+      # This strategy:
+      # 1. Generates an embedding for the user's message
+      # 2. Finds the nearest routing examples using cosine similarity
+      # 3. Routes to the agent associated with the best match
+      # 4. Falls back if confidence is below threshold
+      class Semantic < Base
+        def route(message, agents:, examples:, current_agent:, config:)
+          # If no examples, use fallback
+          if examples.nil? || examples_empty?(examples)
+            return apply_fallback(
+              config: config,
+              current_agent: current_agent,
+              default_agent: config.default_agent
+            )
+          end
+
+          # Generate embedding for the message
+          embedding = generate_embedding(message, config.embedding_model)
+
+          # Find nearest neighbors
+          matches = find_nearest_neighbors(examples, embedding, config)
+
+          # No matches found
+          if matches.empty?
+            return apply_fallback(
+              config: config,
+              current_agent: current_agent,
+              default_agent: config.default_agent
+            )
+          end
+
+          # Get best match and calculate confidence
+          best_match = matches.first
+          confidence = calculate_confidence(best_match)
+
+          # Check threshold
+          if confidence < config.similarity_threshold
+            return apply_fallback(
+              config: config,
+              current_agent: current_agent,
+              default_agent: config.default_agent
+            )
+          end
+
+          # Return semantic match decision
+          RoutingDecision.new(
+            agent: extract_agent_name(best_match),
+            confidence: confidence,
+            matched_example: extract_example_text(best_match),
+            reason: :semantic_match
+          )
+        end
+
+        private
+
+        def examples_empty?(examples)
+          if examples.respond_to?(:empty?)
+            examples.empty?
+          elsif examples.respond_to?(:count)
+            examples.count.zero?
+          else
+            !examples || examples.to_a.empty?
+          end
+        end
+
+        def generate_embedding(message, model)
+          response = RubyLLM.embed(message, model: model)
+          response.vectors.first
+        rescue StandardError => e
+          raise EmbeddingError, e
+        end
+
+        def find_nearest_neighbors(examples, embedding, config)
+          # Support both ActiveRecord (with neighbor gem) and in-memory arrays
+          if examples.respond_to?(:nearest_neighbors)
+            # ActiveRecord with neighbor gem
+            examples.nearest_neighbors(:embedding, embedding, distance: :cosine)
+                    .limit(config.k_neighbors)
+                    .to_a
+          else
+            # In-memory array - calculate distances manually
+            find_nearest_in_memory(examples.to_a, embedding, config.k_neighbors)
+          end
+        end
+
+        def find_nearest_in_memory(examples, query_embedding, k)
+          # Calculate cosine distance for each example
+          scored = examples.map do |example|
+            distance = cosine_distance(query_embedding, example.embedding)
+            [example, distance]
+          end
+
+          # Sort by distance (ascending) and take top k
+          scored.sort_by { |_, distance| distance }
+                .first(k)
+                .map { |example, distance| InMemoryMatch.new(example, distance) }
+        end
+
+        def cosine_distance(a, b)
+          # Cosine distance = 1 - cosine similarity
+          dot_product = a.zip(b).sum { |x, y| x * y }
+          magnitude_a = Math.sqrt(a.sum { |x| x**2 })
+          magnitude_b = Math.sqrt(b.sum { |x| x**2 })
+
+          return 1.0 if magnitude_a.zero? || magnitude_b.zero?
+
+          1.0 - (dot_product / (magnitude_a * magnitude_b))
+        end
+
+        def calculate_confidence(match)
+          # Convert cosine distance to similarity (confidence)
+          # Distance is 0-2 for cosine, similarity is 0-1
+          distance = extract_distance(match)
+          [1.0 - distance, 0.0].max
+        end
+
+        def extract_distance(match)
+          if match.respond_to?(:neighbor_distance)
+            match.neighbor_distance
+          elsif match.respond_to?(:distance)
+            match.distance
+          else
+            1.0 # Maximum distance if we can't determine
+          end
+        end
+
+        def extract_agent_name(match)
+          if match.respond_to?(:agent_name)
+            match.agent_name
+          elsif match.respond_to?(:example) && match.example.respond_to?(:agent_name)
+            match.example.agent_name
+          else
+            raise Error, "Cannot extract agent_name from match: #{match.inspect}"
+          end
+        end
+
+        def extract_example_text(match)
+          if match.respond_to?(:example_text)
+            match.example_text
+          elsif match.respond_to?(:example) && match.example.respond_to?(:example_text)
+            match.example.example_text
+          elsif match.respond_to?(:text)
+            match.text
+          else
+            nil
+          end
+        end
+
+        # Wrapper for in-memory matches to provide a consistent interface
+        class InMemoryMatch
+          attr_reader :example, :distance
+
+          def initialize(example, distance)
+            @example = example
+            @distance = distance
+          end
+
+          def agent_name
+            example.agent_name
+          end
+
+          def example_text
+            example.example_text
+          end
+
+          def neighbor_distance
+            distance
+          end
+        end
+      end
+    end
+  end
+end
