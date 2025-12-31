@@ -170,6 +170,34 @@ router.current_agent                 # => :support
 router.messages.size                 # => 4 (2 exchanges)
 ```
 
+### ActiveRecord + pgvector
+
+Use the [neighbor](https://github.com/ankane/neighbor) gem for PostgreSQL:
+
+```ruby
+# Migration
+create_table :routing_examples do |t|
+  t.string :agent_name, null: false
+  t.text :example_text, null: false
+  t.vector :embedding, limit: 1536  # text-embedding-3-small dimensions
+end
+
+# Model
+class RoutingExample < ApplicationRecord
+  has_neighbors :embedding
+end
+
+# Usage
+router = RubyLLM::SemanticRouter.new(
+  agents: { product: product_chat, support: support_chat },
+  default_agent: :product
+)
+router.with_examples(RoutingExample.all)
+
+# Scoped for multi-tenant
+router.with_examples(RoutingExample.where(tenant_id: current_tenant.id))
+```
+
 ### Custom Vector Search
 
 Bring your own vector database (Pinecone, Qdrant, OpenSearch, etc.):
