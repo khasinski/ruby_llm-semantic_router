@@ -29,11 +29,11 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Runtime dependencies
-  spec.add_dependency "ruby_llm", ">= 1.0"
+  spec.add_dependency "ruby_llm", "~> 1.0"
 
   # Development dependencies
-  spec.add_development_dependency "bundler", ">= 1.17"
-  spec.add_development_dependency "rake", ">= 10.0"
+  spec.add_development_dependency "bundler", "~> 2.0"
+  spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "rspec", "~> 3.0"
   # spec.add_development_dependency "neighbor", ">= 0.3"  # Optional: for ActiveRecord tests
 end
