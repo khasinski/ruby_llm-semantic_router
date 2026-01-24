@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2025-01-24
 
 ### Added
 - Shared `Utils` module with `cosine_distance`, `cosine_similarity`, and `truncate_to_max_words` methods
@@ -80,9 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global configuration via `RubyLLM::SemanticRouter.configure`
 - Comprehensive test suite
 
-[Unreleased]: https://github.com/khasinski/rubyllm-semantic_router/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/khasinski/rubyllm-semantic_router/compare/v0.1.3...v0.2.0
-[0.1.3]: https://github.com/khasinski/rubyllm-semantic_router/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/khasinski/rubyllm-semantic_router/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/khasinski/rubyllm-semantic_router/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/khasinski/rubyllm-semantic_router/releases/tag/v0.1.0
+[0.3.0]: https://github.com/khasinski/ruby_llm-semantic_router/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/khasinski/ruby_llm-semantic_router/compare/v0.1.3...v0.2.0
+[0.1.3]: https://github.com/khasinski/ruby_llm-semantic_router/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/khasinski/ruby_llm-semantic_router/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/khasinski/ruby_llm-semantic_router/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/khasinski/ruby_llm-semantic_router/releases/tag/v0.1.0
