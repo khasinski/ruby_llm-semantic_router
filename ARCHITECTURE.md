@@ -10,7 +10,15 @@ This document describes the architecture and design decisions of RubyLLM Semanti
 │  - Manages agents and conversation state                    │
 │  - Delegates routing to strategy                            │
 │  - Handles agent switching and chat                         │
+│  - Provides ask, ask_batch, match, debug_routing APIs       │
 └─────────────────────────────────────────────────────────────┘
+           │                    │                    │
+           │                    │                    │
+           ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ EmbeddingCache  │  │     Logger      │  │  Retry Logic    │
+│ (optional TTL)  │  │   (optional)    │  │ (exp. backoff)  │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -40,7 +48,10 @@ The main entry point that orchestrates routing and agent management.
 - Store and manage routing examples
 - Delegate routing decisions to the strategy
 - Maintain conversation state and agent switching
-- Provide the `ask`, `match`, and `debug_routing` APIs
+- Provide the `ask`, `ask_batch`, `match`, and `debug_routing` APIs
+- Manage embedding cache (if configured)
+- Handle retry logic for transient failures
+- Emit debug logs (if logger configured)
 
 **Key Design Decisions:**
 - Accepts RubyLLM chat objects directly for ergonomic API
@@ -75,14 +86,20 @@ Value object representing a routing decision.
 
 ### Configuration (`lib/rubyllm/semantic_router/configuration.rb`)
 
-Global configuration with validation.
+Global configuration with validation. All setters validate input and raise `ConfigurationError` for invalid values.
 
-**Configurable Options:**
+**Routing Options:**
 - `default_embedding_model` - Model for generating embeddings
 - `default_similarity_threshold` - Minimum confidence for routing (0.0-1.0)
 - `default_k_neighbors` - Number of neighbors for kNN
 - `default_fallback` - Behavior when no match found
 - `default_max_words` - Message truncation limit
+
+**Reliability Options:**
+- `logger` - Logger instance for debug output (default: nil)
+- `cache_ttl` - Embedding cache TTL in seconds (default: nil = no caching)
+- `max_retries` - Maximum retry attempts for embedding failures (default: 3)
+- `retry_base_delay` - Base delay for exponential backoff in seconds (default: 0.5)
 
 ### Utils (`lib/rubyllm/semantic_router/utils.rb`)
 
@@ -91,6 +108,28 @@ Shared utility functions.
 - `cosine_distance(a, b)` - Calculate cosine distance between vectors
 - `cosine_similarity(a, b)` - Calculate cosine similarity
 - `truncate_to_max_words(text, max_words)` - Truncate text by word count
+
+### EmbeddingCache (`lib/rubyllm/semantic_router/embedding_cache.rb`)
+
+Thread-safe in-memory cache for embeddings with TTL support.
+
+**Purpose:** Reduce API calls and latency when the same text is embedded multiple times (e.g., adding the same example after clearing, or routing identical messages).
+
+**Features:**
+- TTL-based expiration
+- Thread-safe with Mutex
+- Simple get/set/fetch interface
+- Automatic cleanup of expired entries
+
+```ruby
+# Internal structure
+CacheEntry = Struct.new(:embedding, :expires_at)
+
+# Usage (internal to Router)
+@embedding_cache.fetch(text) { generate_embedding_api_call(text) }
+```
+
+**Note:** The cache is per-router instance. Each router maintains its own cache.
 
 ### Errors (`lib/rubyllm/semantic_router/errors.rb`)
 
@@ -146,13 +185,75 @@ find_examples: ->(embedding, limit:) {
 ## Routing Flow
 
 1. **Message received** via `router.ask(message)`
-2. **Generate embedding** for the message using configured model
-3. **Find nearest neighbors** from examples (k = `k_neighbors`)
-4. **Calculate confidence** from cosine distance of best match
-5. **Apply threshold** - if below `similarity_threshold`, use fallback
-6. **Return decision** with target agent and metadata
-7. **Switch agent** if target differs from current
-8. **Send message** to current agent's chat and return response
+2. **Log** routing attempt (if logger configured)
+3. **Check cache** for existing embedding (if cache enabled)
+4. **Generate embedding** for the message using configured model
+   - On failure: retry with exponential backoff (up to `max_retries`)
+   - Cache result (if cache enabled)
+5. **Find nearest neighbors** from examples (k = `k_neighbors`)
+6. **Calculate confidence** from cosine distance of best match
+7. **Apply threshold** - if below `similarity_threshold`, use fallback
+8. **Log** routing decision (if logger configured)
+9. **Return decision** with target agent and metadata
+10. **Switch agent** if target differs from current
+11. **Send message** to current agent's chat and return response
+
+## Batch Routing Flow
+
+For `router.ask_batch(messages)`:
+
+1. **Generate embeddings** for all messages in single API call
+2. **Route each message** using its pre-computed embedding
+3. **Return array** of `RoutingDecision` objects
+4. **Note:** Does not send messages or switch agents - only returns decisions
+
+## Reliability Features
+
+### Logging
+
+When a logger is configured, the router emits debug information:
+
+```
+[SemanticRouter] Router initialized with agents: product, support
+[SemanticRouter] Routing message: Show me laptops...
+[SemanticRouter] Cache hit for embedding
+[SemanticRouter] Routed to :product (confidence: 0.892, reason: semantic_match)
+[SemanticRouter] Switching from :support to :product
+```
+
+Log levels used:
+- `debug` - Detailed operation info (routing attempts, cache hits, agent switches)
+- `info` - Routing decisions
+- `warn` - Retry attempts
+- `error` - Final failures after retries exhausted
+
+### Retry with Exponential Backoff
+
+Embedding API calls are retried on failure:
+
+```
+Attempt 1: fail → wait 0.5s
+Attempt 2: fail → wait 1.0s
+Attempt 3: fail → wait 2.0s
+Attempt 4: fail → raise EmbeddingError
+```
+
+Formula: `delay = retry_base_delay * (2 ** attempt_number)`
+
+### Embedding Cache
+
+Reduces API calls by caching embeddings:
+
+```ruby
+# First call - generates embedding, stores in cache
+router.add_example("Show products", agent: :product)
+
+# Later - same text uses cached embedding
+router.clear_examples!
+router.add_example("Show products", agent: :product)  # Cache hit
+```
+
+Cache is keyed by the truncated text (after `max_words` applied).
 
 ## Design Principles
 
@@ -223,4 +324,6 @@ end
 - **In-memory kNN** is O(n) - fine for hundreds of examples
 - **neighbor gem** uses database indexes for O(log n) performance
 - **Batch imports** (`import_examples`) reduce embedding API calls
+- **Batch routing** (`ask_batch`) generates all embeddings in one API call
+- **Embedding cache** eliminates redundant API calls for repeated text
 - **max_words** truncation reduces embedding costs for long messages

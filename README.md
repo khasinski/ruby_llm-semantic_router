@@ -95,6 +95,45 @@ decisions.each do |decision|
 end
 ```
 
+## Error Handling
+
+### Configuration Validation
+
+All configuration values are validated. Invalid values raise `ConfigurationError`:
+
+```ruby
+# These will raise ConfigurationError:
+router = RubyLLM::SemanticRouter.new(
+  agents: agents,
+  default_agent: :product,
+  similarity_threshold: 1.5  # Must be 0.0-1.0
+)
+
+RubyLLM::SemanticRouter.configure do |config|
+  config.default_k_neighbors = 0  # Must be positive integer
+end
+```
+
+**Validation rules:**
+- `similarity_threshold`: Must be between 0.0 and 1.0
+- `k_neighbors`: Must be a positive integer
+- `max_words`: Must be `nil` or a positive integer
+- `fallback`: Must be `:default_agent`, `:keep_current`, or `:ask_clarification`
+- `cache_ttl`: Must be `nil` or a positive number
+- `max_retries`: Must be a non-negative integer
+
+### Embedding Errors
+
+Failed embedding API calls raise `EmbeddingError` after exhausting retries:
+
+```ruby
+begin
+  router.ask("Hello")
+rescue RubyLLM::SemanticRouter::EmbeddingError => e
+  puts "Embedding failed: #{e.message}"
+end
+```
+
 ## Global Configuration
 
 Set defaults for all routers:
