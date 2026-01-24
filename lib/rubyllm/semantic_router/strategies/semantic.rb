@@ -11,7 +11,7 @@ module RubyLLM
       # 3. Routes to the agent associated with the best match
       # 4. Falls back if confidence is below threshold
       class Semantic < Base
-        def route(message, agents:, examples:, current_agent:, config:, find_examples: nil)
+        def route(message, agents:, examples:, current_agent:, config:, find_examples: nil, precomputed_embedding: nil)
           # If custom find_examples provided, use it
           # Otherwise, check if we have examples to search
           has_search = find_examples.respond_to?(:call) ||
@@ -25,8 +25,8 @@ module RubyLLM
             )
           end
 
-          # Generate embedding for the message
-          embedding = generate_embedding(message, config.embedding_model, max_words: config.max_words)
+          # Use precomputed embedding if provided (for batch operations), otherwise generate
+          embedding = precomputed_embedding || generate_embedding(message, config.embedding_model, max_words: config.max_words)
 
           # Find nearest neighbors using custom search or built-in
           matches = if find_examples.respond_to?(:call)
@@ -89,12 +89,7 @@ module RubyLLM
         end
 
         def truncate_to_max_words(text, max_words)
-          return text unless max_words
-
-          words = text.split
-          return text if words.size <= max_words
-
-          words.first(max_words).join(" ")
+          Utils.truncate_to_max_words(text, max_words)
         end
 
         def find_nearest_neighbors(examples, embedding, config)
@@ -135,14 +130,7 @@ module RubyLLM
         end
 
         def cosine_distance(a, b)
-          # Cosine distance = 1 - cosine similarity
-          dot_product = a.zip(b).sum { |x, y| x * y }
-          magnitude_a = Math.sqrt(a.sum { |x| x**2 })
-          magnitude_b = Math.sqrt(b.sum { |x| x**2 })
-
-          return 1.0 if magnitude_a.zero? || magnitude_b.zero?
-
-          1.0 - (dot_product / (magnitude_a * magnitude_b))
+          Utils.cosine_distance(a, b)
         end
 
         def calculate_confidence(match)

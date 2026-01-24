@@ -14,7 +14,9 @@ end
 
 require_relative "semantic_router/version"
 require_relative "semantic_router/errors"
+require_relative "semantic_router/utils"
 require_relative "semantic_router/configuration"
+require_relative "semantic_router/embedding_cache"
 require_relative "semantic_router/routing_decision"
 require_relative "semantic_router/strategies/base"
 require_relative "semantic_router/strategies/semantic"

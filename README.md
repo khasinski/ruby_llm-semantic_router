@@ -56,7 +56,11 @@ router = RubyLLM::SemanticRouter.new(
   similarity_threshold: 0.7,          # Route only if confidence > threshold
   fallback: :default_agent,           # :default_agent | :keep_current | :ask_clarification
   embedding_model: "text-embedding-3-small",
-  max_words: 50                       # Truncate messages to first N words (default: unlimited)
+  max_words: 50,                      # Truncate messages to first N words (default: unlimited)
+  logger: Rails.logger,               # Enable debug logging (default: nil)
+  cache_ttl: 300,                     # Cache embeddings for 5 minutes (default: nil)
+  max_retries: 3,                     # Retry failed embedding calls (default: 3)
+  retry_base_delay: 0.5               # Base delay for exponential backoff (default: 0.5s)
 )
 ```
 
@@ -70,6 +74,43 @@ decision.confidence  # => 0.85
 
 # Detailed routing info
 router.debug_routing("test message")
+```
+
+## Batch Routing
+
+Route multiple messages efficiently with a single embedding API call:
+
+```ruby
+messages = [
+  "Show me products",
+  "I need help with my account",
+  "What's your return policy?"
+]
+
+decisions = router.ask_batch(messages)
+# => [RoutingDecision, RoutingDecision, RoutingDecision]
+
+decisions.each do |decision|
+  puts "#{decision.agent}: confidence #{decision.confidence}"
+end
+```
+
+## Global Configuration
+
+Set defaults for all routers:
+
+```ruby
+RubyLLM::SemanticRouter.configure do |config|
+  config.default_embedding_model = "text-embedding-3-small"
+  config.default_similarity_threshold = 0.7
+  config.default_k_neighbors = 3
+  config.default_fallback = :default_agent
+  config.default_max_words = nil
+  config.logger = Rails.logger
+  config.cache_ttl = 300              # 5 minute cache
+  config.max_retries = 3
+  config.retry_base_delay = 0.5
+end
 ```
 
 ## Storage Options
@@ -93,6 +134,29 @@ end
 router.with_examples(RoutingExample.all)
 router.with_examples(RoutingExample.where(tenant_id: current_tenant.id))
 ```
+
+### Multi-tenant Scoping
+
+For multi-tenant applications, use the `scope` parameter to isolate routing examples:
+
+```ruby
+# Create scoped router
+router = RubyLLM::SemanticRouter.new(
+  agents: { product: product, support: support },
+  default_agent: :product,
+  scope: "tenant_123"
+)
+
+# With ActiveRecord, add a router_scope column to your model
+class RoutingExample < ApplicationRecord
+  has_neighbors :embedding
+end
+
+# Examples are automatically filtered by scope
+router.with_examples(RoutingExample.all)  # Only queries where router_scope = "tenant_123"
+```
+
+For in-memory examples, the router filters examples that respond to `router_scope` and match the configured scope.
 
 ### Custom Vector Database
 

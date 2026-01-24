@@ -55,5 +55,12 @@ module RubyLLM
         super("Invalid agent definition: #{message}")
       end
     end
+
+    # Raised when configuration value is invalid
+    class ConfigurationError < Error
+      def initialize(message)
+        super("Invalid configuration: #{message}")
+      end
+    end
   end
 end

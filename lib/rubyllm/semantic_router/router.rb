@@ -38,7 +38,7 @@ module RubyLLM
     #   router.ask("What laptops do you have?")
     #
     class Router
-      attr_reader :agents, :current_agent, :last_routing_decision
+      attr_reader :agents, :current_agent, :last_routing_decision, :embedding_cache
 
       # In-memory routing example for non-Rails usage
       InMemoryExample = Struct.new(:agent_name, :example_text, :embedding, keyword_init: true)
@@ -54,7 +54,11 @@ module RubyLLM
         strategy: nil,
         examples: nil,
         find_examples: nil,
-        max_words: nil
+        max_words: nil,
+        logger: nil,
+        cache_ttl: nil,
+        max_retries: nil,
+        retry_base_delay: nil
       )
         @agents = normalize_agents(agents)
         @default_agent = default_agent.to_sym
@@ -66,6 +70,16 @@ module RubyLLM
 
         validate_default_agent!
 
+        global_config = SemanticRouter.configuration || Configuration.new
+
+        @logger = logger || global_config.logger
+        @max_retries = max_retries || global_config.max_retries
+        @retry_base_delay = retry_base_delay || global_config.retry_base_delay
+
+        # Set up embedding cache if TTL is configured
+        ttl = cache_ttl || global_config.cache_ttl
+        @embedding_cache = ttl ? EmbeddingCache.new(ttl: ttl) : nil
+
         @config = build_config(
           embedding_model: embedding_model,
           similarity_threshold: similarity_threshold,
@@ -76,6 +90,8 @@ module RubyLLM
 
         @chat = nil
         @last_routing_decision = nil
+
+        log(:debug, "Router initialized with agents: #{@agents.keys.join(', ')}")
       end
 
       # Send a message to the router and get a response
@@ -84,16 +100,55 @@ module RubyLLM
       # @yield [chunk] Optional block for streaming responses
       # @return [RubyLLM::Message] The response from the selected agent
       def ask(message, &block)
+        log(:debug, "Routing message: #{message[0..100]}...")
+
         @last_routing_decision = route(message)
 
+        log(:info, "Routed to :#{@last_routing_decision.agent} " \
+                   "(confidence: #{@last_routing_decision.confidence.round(3)}, " \
+                   "reason: #{@last_routing_decision.reason})")
+
         target_agent = @last_routing_decision.agent
-        switch_to(target_agent) if target_agent != @current_agent
+        if target_agent != @current_agent
+          log(:debug, "Switching from :#{@current_agent} to :#{target_agent}")
+          switch_to(target_agent)
+        end
 
         if @last_routing_decision.needs_clarification?
           inject_clarification_prompt
         end
 
         current_chat.ask(message, &block)
+      end
+
+      # Route multiple messages and return their routing decisions
+      # Useful for batch analysis or pre-routing without conversation
+      #
+      # @param messages [Array<String>] Messages to route
+      # @return [Array<RoutingDecision>] Routing decisions for each message
+      def ask_batch(messages)
+        log(:debug, "Batch routing #{messages.size} messages")
+
+        # Generate embeddings for all messages at once
+        truncated = messages.map { |m| truncate_to_max_words(m) }
+        embeddings = generate_embeddings_batch_with_retry(truncated)
+
+        # Route each message using its pre-computed embedding
+        messages.each_with_index.map do |message, i|
+          decision = @strategy.route(
+            message,
+            agents: @agents,
+            examples: scoped_examples,
+            current_agent: @current_agent,
+            config: @config,
+            find_examples: @find_examples,
+            precomputed_embedding: embeddings[i]
+          )
+
+          log(:debug, "Batch[#{i}] -> :#{decision.agent} (confidence: #{decision.confidence.round(3)})")
+          emit(:on_route, decision)
+          decision
+        end
       end
 
       # Add a routing example
@@ -288,48 +343,80 @@ module RubyLLM
 
       def generate_embedding(text)
         truncated = truncate_to_max_words(text)
-        response = RubyLLM.embed(truncated, model: @config.embedding_model)
-        vectors = response.vectors
-        # RubyLLM returns the vector directly for single inputs,
-        # or wrapped in an array for batch inputs
-        vectors.first.is_a?(Array) ? vectors.first : vectors
-      rescue StandardError => e
-        raise EmbeddingError, e
+
+        # Check cache first
+        if @embedding_cache
+          cached = @embedding_cache.get(truncated)
+          if cached
+            log(:debug, "Cache hit for embedding")
+            return cached
+          end
+        end
+
+        embedding = generate_embedding_with_retry(truncated)
+
+        # Store in cache
+        @embedding_cache&.set(truncated, embedding)
+
+        embedding
+      end
+
+      def generate_embedding_with_retry(text)
+        attempts = 0
+        begin
+          attempts += 1
+          response = RubyLLM.embed(text, model: @config.embedding_model)
+          vectors = response.vectors
+          # RubyLLM returns the vector directly for single inputs,
+          # or wrapped in an array for batch inputs
+          vectors.first.is_a?(Array) ? vectors.first : vectors
+        rescue StandardError => e
+          if attempts <= @max_retries
+            delay = @retry_base_delay * (2**(attempts - 1))
+            log(:warn, "Embedding failed (attempt #{attempts}/#{@max_retries + 1}), retrying in #{delay}s: #{e.message}")
+            sleep(delay)
+            retry
+          end
+          log(:error, "Embedding failed after #{attempts} attempts: #{e.message}")
+          raise EmbeddingError, e
+        end
       end
 
       def generate_embeddings_batch(texts)
         truncated_texts = texts.map { |t| truncate_to_max_words(t) }
-        response = RubyLLM.embed(truncated_texts, model: @config.embedding_model)
-        vectors = response.vectors
-        # For batch, RubyLLM returns array of vectors
-        # But if single text was passed, it returns vector directly
-        vectors.first.is_a?(Array) ? vectors : [vectors]
-      rescue StandardError => e
-        raise EmbeddingError, e
+        generate_embeddings_batch_with_retry(truncated_texts)
+      end
+
+      def generate_embeddings_batch_with_retry(truncated_texts)
+        attempts = 0
+        begin
+          attempts += 1
+          response = RubyLLM.embed(truncated_texts, model: @config.embedding_model)
+          vectors = response.vectors
+          # For batch, RubyLLM returns array of vectors
+          # But if single text was passed, it returns vector directly
+          vectors.first.is_a?(Array) ? vectors : [vectors]
+        rescue StandardError => e
+          if attempts <= @max_retries
+            delay = @retry_base_delay * (2**(attempts - 1))
+            log(:warn, "Batch embedding failed (attempt #{attempts}/#{@max_retries + 1}), retrying in #{delay}s: #{e.message}")
+            sleep(delay)
+            retry
+          end
+          log(:error, "Batch embedding failed after #{attempts} attempts: #{e.message}")
+          raise EmbeddingError, e
+        end
       end
 
       def truncate_to_max_words(text)
-        return text unless @config.max_words
-
-        words = text.split
-        return text if words.size <= @config.max_words
-
-        words.first(@config.max_words).join(" ")
+        Utils.truncate_to_max_words(text, @config.max_words)
       end
 
       def find_nearest_in_memory(examples, query_embedding, k)
         examples.map do |example|
-          distance = cosine_distance(query_embedding, example.embedding)
+          distance = Utils.cosine_distance(query_embedding, example.embedding)
           Strategies::Semantic::InMemoryMatch.new(example, distance)
         end.sort_by(&:distance).first(k)
-      end
-
-      def cosine_distance(a, b)
-        dot_product = a.zip(b).sum { |x, y| x * y }
-        magnitude_a = Math.sqrt(a.sum { |x| x**2 })
-        magnitude_b = Math.sqrt(b.sum { |x| x**2 })
-        return 1.0 if magnitude_a.zero? || magnitude_b.zero?
-        1.0 - (dot_product / (magnitude_a * magnitude_b))
       end
 
       def extract_agent_name(match)
@@ -457,20 +544,64 @@ module RubyLLM
       def build_config(embedding_model:, similarity_threshold:, k_neighbors:, fallback:, max_words:)
         global_config = SemanticRouter.configuration || Configuration.new
 
+        # Use provided values or fall back to global config
+        threshold = similarity_threshold || global_config.default_similarity_threshold
+        neighbors = k_neighbors || global_config.default_k_neighbors
+        words = max_words || global_config.default_max_words
+        fb = fallback || global_config.default_fallback
+
+        # Validate router-specific overrides
+        validate_config_values!(
+          similarity_threshold: threshold,
+          k_neighbors: neighbors,
+          max_words: words,
+          fallback: fb
+        )
+
         RouterConfig.new(
           embedding_model: embedding_model || global_config.default_embedding_model,
-          similarity_threshold: similarity_threshold || global_config.default_similarity_threshold,
-          k_neighbors: k_neighbors || global_config.default_k_neighbors,
-          fallback: fallback || global_config.default_fallback,
+          similarity_threshold: threshold,
+          k_neighbors: neighbors,
+          fallback: fb,
           default_agent: @default_agent,
           scope: @scope,
-          max_words: max_words || global_config.default_max_words
+          max_words: words
         )
+      end
+
+      def validate_config_values!(similarity_threshold:, k_neighbors:, max_words:, fallback:)
+        unless similarity_threshold.is_a?(Numeric) && similarity_threshold >= 0.0 && similarity_threshold <= 1.0
+          raise ConfigurationError, "similarity_threshold must be between 0.0 and 1.0, got: #{similarity_threshold.inspect}"
+        end
+
+        unless k_neighbors.is_a?(Integer) && k_neighbors.positive?
+          raise ConfigurationError, "k_neighbors must be a positive integer, got: #{k_neighbors.inspect}"
+        end
+
+        unless max_words.nil? || (max_words.is_a?(Integer) && max_words.positive?)
+          raise ConfigurationError, "max_words must be nil or a positive integer, got: #{max_words.inspect}"
+        end
+
+        valid_fallbacks = %i[default_agent keep_current ask_clarification]
+        unless valid_fallbacks.include?(fallback)
+          raise ConfigurationError, "fallback must be one of #{valid_fallbacks.join(', ')}, got: #{fallback.inspect}"
+        end
       end
 
       def emit(event, *args)
         @callbacks ||= {}
         @callbacks[event]&.call(*args)
+      end
+
+      def log(level, message)
+        return unless @logger
+
+        case level
+        when :debug then @logger.debug("[SemanticRouter] #{message}")
+        when :info then @logger.info("[SemanticRouter] #{message}")
+        when :warn then @logger.warn("[SemanticRouter] #{message}")
+        when :error then @logger.error("[SemanticRouter] #{message}")
+        end
       end
     end
   end
