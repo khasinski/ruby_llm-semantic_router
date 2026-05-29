@@ -37,7 +37,7 @@ module RubyLLM
 
       def initialize
         @default_embedding_model = "text-embedding-3-small"
-        @default_similarity_threshold = 0.7
+        @default_similarity_threshold = 0.3
         @default_k_neighbors = 3
         @default_fallback = :default_agent
         @default_max_words = nil

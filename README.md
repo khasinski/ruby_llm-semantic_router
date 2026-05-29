@@ -53,7 +53,7 @@ No LLM call needed for routing - just embeddings.
 router = RubyLLM::SemanticRouter.new(
   agents: { ... },
   default_agent: :product,
-  similarity_threshold: 0.7,          # Route only if confidence > threshold
+  similarity_threshold: 0.3,          # Route only if confidence > threshold
   fallback: :default_agent,           # :default_agent | :keep_current | :ask_clarification
   embedding_model: "text-embedding-3-small",
   max_words: 50,                      # Truncate messages to first N words (default: unlimited)
@@ -141,7 +141,7 @@ Set defaults for all routers:
 ```ruby
 RubyLLM::SemanticRouter.configure do |config|
   config.default_embedding_model = "text-embedding-3-small"
-  config.default_similarity_threshold = 0.7
+  config.default_similarity_threshold = 0.3
   config.default_k_neighbors = 3
   config.default_fallback = :default_agent
   config.default_max_words = nil

@@ -9,7 +9,7 @@ RSpec.describe RubyLLM::SemanticRouter::Configuration do
     end
 
     it "sets default similarity threshold" do
-      expect(config.default_similarity_threshold).to eq(0.7)
+      expect(config.default_similarity_threshold).to eq(0.3)
     end
 
     it "sets default k_neighbors" do

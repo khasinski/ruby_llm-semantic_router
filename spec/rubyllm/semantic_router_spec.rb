@@ -37,7 +37,7 @@ RSpec.describe RubyLLM::SemanticRouter do
 
       described_class.reset_configuration!
 
-      expect(described_class.configuration.default_similarity_threshold).to eq(0.7)
+      expect(described_class.configuration.default_similarity_threshold).to eq(0.3)
     end
   end
 

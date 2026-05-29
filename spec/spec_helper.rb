@@ -3,6 +3,9 @@
 require "bundler/setup"
 require "rubyllm/semantic_router"
 
+# Skip mocks for integration tests (they use the real API)
+return if ENV["INTEGRATION"]
+
 # Mock RubyLLM for testing without actual API calls
 module RubyLLM
   class << self

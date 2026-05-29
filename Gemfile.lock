@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rubyllm-semantic_router (0.3.0)
+    rubyllm-semantic_router (0.4.0)
       ruby_llm (~> 1.0)
 
 GEM
@@ -20,9 +20,9 @@ GEM
       net-http (~> 0.5)
     faraday-retry (2.4.0)
       faraday (~> 2.0)
-    json (2.19.5)
+    json (2.19.7)
     logger (1.7.0)
-    marcel (1.1.0)
+    marcel (1.2.1)
     multipart-post (2.4.1)
     net-http (0.9.1)
       uri (>= 0.11.1)
@@ -40,19 +40,19 @@ GEM
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
     rspec-support (3.13.6)
-    ruby_llm (1.9.1)
+    ruby_llm (1.15.0)
       base64
       event_stream_parser (~> 1)
       faraday (>= 1.10.0)
       faraday-multipart (>= 1)
       faraday-net_http (>= 1)
       faraday-retry (>= 1)
-      marcel (~> 1.0)
-      ruby_llm-schema (~> 0.2.1)
+      marcel (~> 1)
+      ruby_llm-schema (~> 0)
       zeitwerk (~> 2)
-    ruby_llm-schema (0.2.5)
+    ruby_llm-schema (0.4.0)
     uri (1.1.1)
-    zeitwerk (2.7.4)
+    zeitwerk (2.8.2)
 
 PLATFORMS
   arm64-darwin-25

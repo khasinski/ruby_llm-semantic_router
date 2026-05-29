@@ -158,7 +158,7 @@ RSpec.describe RubyLLM::SemanticRouter::Router do
       debug_info = router.debug_routing("Show products")
 
       expect(debug_info[:message]).to eq("Show products")
-      expect(debug_info[:threshold]).to eq(0.7)
+      expect(debug_info[:threshold]).to eq(0.3)
       expect(debug_info[:would_route_to]).to eq(:product)
       expect(debug_info[:top_matches]).to be_an(Array)
       expect(debug_info[:top_matches].first[:agent]).to eq(:product)
